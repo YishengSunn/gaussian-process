@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from gp.gp_model import GaussianProcess
 from gp.kernels import RBF_kernel, Matern_kernel, RationalQuadratic_kernel, Periodic_kernel
-from gp.plotting import plot_gp
+from gp.utils import plot_gp
 
 
 """
