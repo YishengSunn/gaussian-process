@@ -44,8 +44,9 @@ class CircleDrawer:
         
         if len(self.current_x) > 1:
             self.strokes.append((self.current_x, self.current_y))
-            self.current_x = []
-            self.current_y = []
+        
+        self.current_x = []
+        self.current_y = []
 
         print(f"Completed strokes: {len(self.strokes)}, Last stroke length: {len(self.strokes[-1][0]) if self.strokes else 0}")
 
