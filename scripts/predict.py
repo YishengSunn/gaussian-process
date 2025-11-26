@@ -68,32 +68,6 @@ class CirclePredictor:
         self.gp_x = GaussianProcess(X_train, Y_train[:, [0]], kernel=self.kernel, sigma_n=self.sigma_n)
         self.gp_y = GaussianProcess(X_train, Y_train[:, [1]], kernel=self.kernel, sigma_n=self.sigma_n)
 
-    def one_time_gp_prediction(self, X_test):
-        """
-        Perform one-time GP prediction on test inputs
-        ------------------------------------------------
-        Inputs: 
-        X_test: (N_test, window*2) array of test inputs
-        ------------------------------------------------
-        Returns: 
-        predicted_positions : (num_steps+1, 2) array of predicted positions
-        predicted_std : (num_steps+1, 2) array of predicted standard deviations
-        ------------------------------------------------
-        """
-        mu_dx, cov_dx = self.gp_x.stable_gp_predict(X_test)
-        mu_dy, cov_dy = self.gp_y.stable_gp_predict(X_test)
-        delta_preds = np.hstack((mu_dx, mu_dy))  # (num_test, 2)
-
-        predicted_positions = [np.array([X_test[0][-2], X_test[0][-1]])]  # p{t-1} for the first test sample
-        predicted_std = [np.array([0.0, 0.0])]  # No uncertainty for the initial position
-
-        for i in range(0, delta_preds.shape[0]):
-            new_position = predicted_positions[-1] + delta_preds[i]
-            predicted_positions.append(new_position)
-            predicted_std.append(np.array([np.sqrt(cov_dx[i, i]), np.sqrt(cov_dy[i, i])]))
-
-        return np.array(predicted_positions), np.array(predicted_std)
-
     def recursive_gp_prediction(self, previous_positions, num_steps):
         """
         Perform recursive GP prediction starting from initial_position
@@ -132,13 +106,12 @@ class CirclePredictor:
 
         return np.array(predicted_positions), np.array(predicted_std)
     
-    def plot_prediction(self, train_positions, test_positions, predicted_positions, predicted_std):
+    def plot_prediction(self, train_positions, predicted_positions, predicted_std):
         """
         Plot the training positions, test positions, and GP predictions with uncertainty
         ---------------------------------------------------------------
         Inputs: 
         train_positions: (N_train, 2) array of training positions
-        test_positions: (N_test, 2) array of test positions
         predicted_positions: (N_test+1, 2) array of predicted positions
         predicted_std: (N_test+1, 2) array of predicted standard deviations
         ---------------------------------------------------------------
@@ -146,7 +119,6 @@ class CirclePredictor:
         plt.figure(figsize=(6, 6))
 
         plt.plot(train_positions[:, 0], train_positions[:, 1], 'r-', label='Training Circle')
-        plt.plot(test_positions[:, 0], test_positions[:, 1], 'g-', label='Test Circle')
         plt.plot(predicted_positions[:, 0], predicted_positions[:, 1], 'b--', label='GP Prediction')
         plt.fill_between(predicted_positions[:, 0],
                          predicted_positions[:, 1]-3*predicted_std[:, 1],
@@ -156,54 +128,67 @@ class CirclePredictor:
         plt.title('Gaussian Process Prediction of Circle')
         plt.gca().set_aspect('equal', adjustable='box')
         plt.grid(True)
-        plt.legend()
 
 
-# A perfect circle
+# ----------------------------
+# 1. Prepare Data
+# ----------------------------
+# Perfect circle
 num_points = 400
-R, center_x, center_y = 2.0, 0.0, 0.0
-theta = np.linspace(np.pi / 2, -np.pi * 3 / 2, num_points)
-positions = np.vstack((center_x + R * np.cos(theta), center_y + R * np.sin(theta))).T  # (num_points, 2)
+R = 2.0
+theta = np.linspace(np.pi/2, -3*np.pi/2, num_points)
+perfect_circle = np.vstack((R * np.cos(theta), R * np.sin(theta))).T
 
-# Manually drawn circle
+# Manual circle
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 path = os.path.join(BASE_DIR, "..", "data", "circle", "strokes.npy")
-strokes = np.load(path, allow_pickle=True)  # Load the mannually drawn circle strokes
-manual_positions = np.array(strokes[0], dtype=float)  # (N, 2)  # Use the first stroke for prediction
+manual_circle = np.array(np.load(path, allow_pickle=True)[0], dtype=float)
 
+# Choose training & test dataset
+train_on_manual, test_on_manual = False, True
+train_data = manual_circle if train_on_manual else perfect_circle
+test_data = manual_circle if test_on_manual else perfect_circle
+
+
+# ----------------------------
+# 2. Build dataset and train GP
+# ----------------------------
 # Initialize predictor
 predictor = CirclePredictor(window=10, predict_delta=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2)
 
-# Build dataset
-X, Y = predictor.build_autoregressive_dataset(positions)
+X, Y = predictor.build_autoregressive_dataset(train_data)
 
-# Train GP models
-train_ratio = 0.8
-train_size = int(X.shape[0] * train_ratio)
+train_size = int(1.0 * X.shape[0])
 predictor.train_gp(X[:train_size], Y[:train_size])
 
-"""
-# One-time prediction
-predicted_positions, predicted_std = predictor.one_time_gp_prediction(X[train_size:])
-"""
 
-# Recursive prediction
-# previous_positions = positions[train_size : train_size + predictor.window]
-# predicted_positions, predicted_std = predictor.recursive_gp_prediction(previous_positions, X.shape[0] - train_size)
+# ----------------------------
+# 3. Prediction
+# ----------------------------
+test_start = 200
 
-previous_positions = manual_positions[100 : 100 + predictor.window]
-predicted_positions, predicted_std = predictor.recursive_gp_prediction(previous_positions, manual_positions.shape[0] - 100)
+# Recursive prediction starting from the end of training data
+initial_window = test_data[test_start : test_start + predictor.window]
 
-# Plot results
-# predictor.plot_prediction(positions[:train_size + predictor.window],
-#                           positions[train_size + predictor.window:],
-#                           predicted_positions,
-#                           predicted_std)
+pred_positions, pred_std = predictor.recursive_gp_prediction(
+    previous_positions=initial_window,
+    num_steps=test_data.shape[0] - predictor.window - test_start
+)
 
-predictor.plot_prediction(positions[:train_size + predictor.window],
-                          positions[train_size + predictor.window:],
-                          predicted_positions,
-                          predicted_std)
 
-plt.plot(manual_positions[:100, 0], manual_positions[:100, 1], 'm-', label='Manual Circle')
+# ----------------------------
+# 4. Plot results
+# ----------------------------
+predictor.plot_prediction(
+    train_positions=train_data[:train_size + predictor.window],
+    predicted_positions=pred_positions,
+    predicted_std=pred_std
+)
+
+if test_on_manual:
+    plt.plot(test_data[:test_start + predictor.window, 0], test_data[:test_start + predictor.window, 1], 'c.', label='Manual Data Points')
+else:
+    plt.plot(test_data[:test_start + predictor.window, 0], test_data[:test_start + predictor.window, 1], 'c.', label='Perfect Circle Points')
+
+plt.legend()
 plt.show()
