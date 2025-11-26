@@ -6,10 +6,12 @@ class GaussianProcess:
     def __init__ (self, X_train, y_train, kernel, sigma_n=1e-2):
         """
         Gaussian Process Regression Model
+        --------------
         X_train : (n1, d) - training points
         y_train : (n1, 1) - training targets
         kernel : kernel function
         sigma_n : noise standard deviation of training data
+        --------------
         """
         self.X_train = X_train
         self.y_train = y_train
@@ -22,9 +24,10 @@ class GaussianProcess:
     def update_training_data(self, X_update, y_update):
         """
         Update training data with new point and recompute K and L
+        --------------
         X_update : (1, d) - new training point
         y_update : (1, 1) - new training target
-        -------------
+        --------------
         """
         self.X_train = np.append(self.X_train, X_update, 0)
         self.y_train = np.append(self.y_train, y_update, 0)
@@ -53,6 +56,7 @@ class GaussianProcess:
     def update_L(self, X_update, y_update):
         """
         Update the Cholesky decomposition L when new training data is added
+        -------------
         X_update : (1, d) - new training point
         y_update : (1, 1) - new training target
         -------------
@@ -79,12 +83,13 @@ class GaussianProcess:
     def stable_gp_predict(self, X_s):
         """
         Stable Gaussian Process Prediction using Cholesky decomposition
+        ----------------
         X_s : (n2, d) - test points
-        -------------
+        ----------------
         returns:
         f : (n2, 1) - predicted mean
         cov : (n2, n2) - predicted covariance
-        -------------
+        ----------------
         """
         
         K_s = self.kernel(self.X_train, X_s)  # (n1, n2)
@@ -112,6 +117,7 @@ class GaussianProcess:
         def negative_log_likelihood(params):
             """
             Computes -log p(y | X, θ) for optimizer.
+            -------------
             params : (3,) - [length_scale, sigma_f, sigma_n]
             -------------
             returns:
@@ -144,7 +150,7 @@ class GaussianProcess:
         
         # Run the optimizer
         initial_params = [init_l, init_sf, init_sn]
-        bounds = [(1e-5, None), (1e-5, None), (1e-5, None)]  # Ensure positive values
+        bounds = [(1e-5, 10), (1e-5, 10), (1e-5, 10)]  # Ensure positive values
         res = minimize(negative_log_likelihood, initial_params, bounds=bounds, method='L-BFGS-B')
 
         opt_l, opt_sf, opt_sn = res.x
