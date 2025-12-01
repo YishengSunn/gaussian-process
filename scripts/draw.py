@@ -6,9 +6,12 @@ import matplotlib.pyplot as plt
 class CircleDrawer:
     def __init__(self, fig, ax, save_path="strokes.npy"):
         """
-        Initialize the CircleDrawer with figure and axis
-        strokes: list of completed strokes
-        current_x, current_y: current stroke coordinates
+        Initialize the CircleDrawer with figure, axis, and save path.
+
+        Args:
+            fig: Matplotlib figure object.
+            ax: Matplotlib axis object.
+            save_path: Path to save the strokes data.
         """
         self.strokes = []
         self.current_x = []
@@ -24,13 +27,17 @@ class CircleDrawer:
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
 
     def on_press(self, event):
-        """Start a new stroke on mouse press."""
+        """
+        Start a new stroke on mouse press.
+        """
         if event.button == 1 and event.xdata is not None and event.ydata is not None:
             self.current_x = [event.xdata]
             self.current_y = [event.ydata]
 
     def on_motion(self, event):
-        """Add points to the current stroke on mouse movement."""
+        """
+        Update the stroke on mouse movement.
+        """
         if len(self.current_x) == 0:
             return
 
@@ -41,7 +48,9 @@ class CircleDrawer:
             self.fig.canvas.draw()
 
     def on_release(self, event):
-        """Complete the stroke on mouse release."""
+        """
+        Complete the stroke on mouse release.
+        """
         if event.button != 1:
             return
         

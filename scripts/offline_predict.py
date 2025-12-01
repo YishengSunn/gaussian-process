@@ -8,8 +8,15 @@ from gp.kernels import RBF_kernel, Matern_kernel, RationalQuadratic_kernel, Peri
 class CirclePredictor:
     def __init__(self, window=10, predict_delta=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2):
         """
-        window: number of past positions used as input
-        predict_delta: if True, predict delta relative to last input position
+        Initialize CirclePredictor with GP kernel and parameters.
+
+        Args:
+            window (int): Number of past positions to use for prediction.
+            predict_delta (bool): Whether to predict position delta or absolute position.
+            kernel_type (str): Type of kernel to use ('RBF', 'Matern', 'RationalQuadratic', 'Periodic').
+            length_scale (float): Length scale parameter for the kernel.
+            sigma_f (float): Signal variance for the kernel.
+            sigma_n (float): Noise variance for the GP.
         """
         self.window = window
         self.sigma_n = sigma_n
@@ -31,12 +38,14 @@ class CirclePredictor:
 
     def build_autoregressive_dataset(self, positions):
         """
-        Build autoregressive dataset from positions
-        ------------------------------------------------
-        Inputs: 
-        positions: (N, 2) array of (x, y)
-        ------------------------------------------------
-        Returns: X (M, window*2), Y (M, 2)
+        Build autoregressive dataset from position data.
+
+        Args:
+            positions (np.ndarray): Array of shape (N, 2) with x and y positions.
+        
+        Returns:
+            X (np.ndarray): Input features of shape (M, window*2).
+            Y (np.ndarray): Target outputs of shape (M, 2).
         """
         N = positions.shape[0]
         M = N - self.window
@@ -58,28 +67,22 @@ class CirclePredictor:
     
     def train_gp(self, X_train, Y_train):
         """
-        Train Gaussian Process models for x and y
-        ------------------------------------------------
-        Inputs: 
-        X_train: (M, window*2) array of input features
-        Y_train: (M, 2) array of target outputs
-        ------------------------------------------------
+        Train separate GPs for x and y coordinates.
         """
         self.gp_x = GaussianProcess(X_train, Y_train[:, [0]], kernel=self.kernel, sigma_n=self.sigma_n)
         self.gp_y = GaussianProcess(X_train, Y_train[:, [1]], kernel=self.kernel, sigma_n=self.sigma_n)
 
     def recursive_gp_prediction(self, previous_positions, num_steps):
         """
-        Perform recursive GP prediction starting from initial_position
-        ---------------------------------------------------------------
-        Inputs: 
-        previous_positions: (window, 2) array of past positions
-        num_steps: number of prediction steps
-        ---------------------------------------------------------------
-        Returns: 
-        predicted_positions : (num_steps+1, 2) array of predicted positions
-        predicted_std : (num_steps+1, 2) array of predicted standard deviations
-        ---------------------------------------------------------------
+        Perform recursive GP prediction for a number of steps.
+
+        Args:
+            previous_positions (np.ndarray): Array of shape (window, 2) with the last known positions.
+            num_steps (int): Number of future steps to predict.
+        
+        Returns:
+            predicted_positions (np.ndarray): Array of shape (num_steps+1, 2) with predicted positions.
+            predicted_std (np.ndarray): Array of shape (num_steps+1, 2) with predicted standard deviations.
         """
         predicted_positions = [previous_positions[-1]]  # Start from the last known position
         predicted_std = [np.array([0.0, 0.0])]  # No uncertainty for the initial position
@@ -108,13 +111,12 @@ class CirclePredictor:
     
     def plot_prediction(self, train_positions, predicted_positions, predicted_std):
         """
-        Plot the training positions, test positions, and GP predictions with uncertainty
-        ---------------------------------------------------------------
-        Inputs: 
-        train_positions: (N_train, 2) array of training positions
-        predicted_positions: (N_test+1, 2) array of predicted positions
-        predicted_std: (N_test+1, 2) array of predicted standard deviations
-        ---------------------------------------------------------------
+        Plot training positions and GP predictions with confidence intervals.
+        
+        Args:
+            train_positions (np.ndarray): Array of shape (N, 2) with training positions.
+            predicted_positions (np.ndarray): Array of shape (M, 2) with predicted positions.
+            predicted_std (np.ndarray): Array of shape (M, 2) with predicted standard deviations.
         """
         plt.figure(figsize=(6, 6))
 

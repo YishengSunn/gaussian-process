@@ -6,16 +6,15 @@ from gp.gp_model import GaussianProcess
 
 def plot_gp(gp, X_s, Y_s, mu_s, cov_s):
     """
-    Plot the results
-    -------------
-    gp : GaussianProcess object
-    X_s : (n2, d) - test points
-    Y_s : (n2, 1) - true function values at test points
-    mu_s : (n2, 1) - predicted mean
-    cov_s : (n2, n2) - predicted covariance
-    -------------
-    """
+    Plot the GP regression results.
 
+    Args:
+        gp: GaussianProcess object - trained GP model
+        X_s: (n, 1) - test inputs
+        Y_s: (n, 1) - true function values at test inputs
+        mu_s: (n, 1) - predicted means at test inputs
+        cov_s: (n, n) - predicted covariance matrix at test inputs
+    """
     std_s = np.sqrt(np.diag(cov_s))
 
     plt.figure(figsize = (10, 6))
@@ -33,20 +32,17 @@ def plot_gp(gp, X_s, Y_s, mu_s, cov_s):
 
 def animate_gp(X_train, y_train, X_s, Y_s, kernel, n, save=False, path="gp_animation.gif", show=True):
     """
-    Animate the GP regression process
-    -------------
-    X_train : (n1, d) - training points
-    y_train : (n1, 1) - training targets
-    X_s : (n2, 1) - test inputs
-    Y_s : (n2, 1) - true function values at test inputs
-    kernel : Kernel object
-    n : int - number of training points
-    save : bool - whether to save the animation
-    path : str - path to save the animation
-    show : bool - whether to plot the animation
-    -------------
-    """
+    Create an animation showing the iterative update of the GP model as new training points are added.
 
+    Args:
+        X_train: (n, 1) - training inputs
+        y_train: (n, 1) - training outputs
+        X_s: (m, 1) - test inputs
+        Y_s: (m, 1) - true function values at test inputs
+        kernel: kernel function for the GP
+        n: int - number of training points to add iteratively
+        save: bool - whether to save the animation
+    """
     fig, ax = plt.subplots(figsize=(10, 6))
     line_mu, = ax.plot([], [], 'b-', label="Predicted Mean")
     line_y, = ax.plot([], [], 'ro', label="Training Points")
@@ -64,11 +60,17 @@ def animate_gp(X_train, y_train, X_s, Y_s, kernel, n, save=False, path="gp_anima
 
 
     def init():
+        """
+        Initialize the animation.
+        """
         line_mu.set_data([], [])
         line_y.set_data([], [])
         return line_mu, line_y
 
     def update(frame):
+        """
+        Update function for each frame of the animation.
+        """
         print(f"Iteration {frame}")
 
         nonlocal shade, gp_local

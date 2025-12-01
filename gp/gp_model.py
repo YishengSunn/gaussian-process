@@ -5,13 +5,13 @@ from scipy.optimize import minimize
 class GaussianProcess:
     def __init__ (self, X_train, y_train, kernel, sigma_n=1e-2):
         """
-        Gaussian Process Regression Model
-        --------------
-        X_train : (n1, d) - training points
+        Gaussian Process Regression Model.
+        
+        Args:
+        X_train : (n1, d) - training inputs
         y_train : (n1, 1) - training targets
-        kernel : kernel function
-        sigma_n : noise standard deviation of training data
-        --------------
+        kernel : callable - kernel function
+        sigma_n : float - noise standard deviation
         """
         self.X_train = X_train
         self.y_train = y_train
@@ -23,11 +23,11 @@ class GaussianProcess:
 
     def update_training_data(self, X_update, y_update):
         """
-        Update training data with new point and recompute K and L
-        --------------
-        X_update : (1, d) - new training point
-        y_update : (1, 1) - new training target
-        --------------
+        Update training data with new points.
+        
+        Args:
+            X_update : (m, d) - new training inputs
+            y_update : (m, 1) - new training targets
         """
         self.X_train = np.append(self.X_train, X_update, 0)
         self.y_train = np.append(self.y_train, y_update, 0)
@@ -36,15 +36,15 @@ class GaussianProcess:
 
     def gp_predict(self, X_s):
         """
-        Gaussian Process Prediction
-        X_s : (n2, d) - test points
-        -------------
-        returns:
-        f : (n2, 1) - predicted mean
-        cov : (n2, n2) - predicted covariance
-        -------------
-        """
+        Gaussian Process Prediction.
 
+        Args:
+            X_s : (n2, d) - test points
+        
+        Returns:
+            mu : (n2, 1) - predicted mean
+            cov : (n2, n2) - predicted covariance
+        """
         K_s = self.kernel(self.X_train, X_s)  # (n1, n2)
         K_ss = self.kernel(X_s, X_s)  # (n2, n2)
 
@@ -55,11 +55,11 @@ class GaussianProcess:
 
     def update_L(self, X_update, y_update):
         """
-        Update the Cholesky decomposition L when new training data is added
-        -------------
-        X_update : (1, d) - new training point
-        y_update : (1, 1) - new training target
-        -------------
+        Update Cholesky factor L with new training data.
+
+        Args:
+            X_update : (1, d) - new training input
+            y_update : (1, 1) - new training target
         """
         self.X_train = np.append(self.X_train, X_update, 0)
         self.y_train = np.append(self.y_train, y_update, 0)
@@ -82,16 +82,15 @@ class GaussianProcess:
     
     def stable_gp_predict(self, X_s):
         """
-        Stable Gaussian Process Prediction using Cholesky decomposition
-        ----------------
-        X_s : (n2, d) - test points
-        ----------------
-        returns:
-        f : (n2, 1) - predicted mean
-        cov : (n2, n2) - predicted covariance
-        ----------------
-        """
+        Stable Gaussian Process Prediction using Cholesky decomposition.
         
+        Args:
+            X_s : (n2, d) - test points
+        
+        Returns:
+            mu : (n2, 1) - predicted mean
+            cov : (n2, n2) - predicted covariance
+        """
         K_s = self.kernel(self.X_train, X_s)  # (n1, n2)
         K_ss = self.kernel(X_s, X_s)  # (n2, n2)
 
@@ -105,10 +104,13 @@ class GaussianProcess:
     
     def optimize_hyperparameters(self):
         """
-        Optimize hyperparameters of the kernel and noise using Maximum Likelihood Estimation
-        -------------
+        Optimize hyperparameters (length_scale, sigma_f, sigma_n) by maximizing the log marginal likelihood.
+
+        Returns:
+            opt_l : float - optimized length scale
+            opt_sf : float - optimized signal variance
+            opt_sn : float - optimized noise standard deviation
         """
-        
         # Extract initial values from kernel object
         init_l = self.kernel.l
         init_sf = self.kernel.sf
@@ -116,15 +118,14 @@ class GaussianProcess:
 
         def negative_log_likelihood(params):
             """
-            Computes -log p(y | X, θ) for optimizer.
-            -------------
-            params : (3,) - [length_scale, sigma_f, sigma_n]
-            -------------
-            returns:
-            nll : float - negative log likelihood
-            -------------
+            Compute the negative log marginal likelihood for given hyperparameters.
+            
+            Args:
+                params : list - [length_scale, sigma_f, sigma_n]
+                
+            Returns:
+                nll : float - negative log marginal likelihood
             """
-
             l, sf, sn = params
 
             # Update kernel with new parameters
