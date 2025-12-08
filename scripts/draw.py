@@ -66,13 +66,15 @@ class CircleDrawer:
 
 # Path to save the strokes
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-path = os.path.join(BASE_DIR, "..", "data", "circle", "strokes.npy")
+path = os.path.join(BASE_DIR, "..", "data", "circle", "circle.npy")
 
 # Set up the plot
 fig, ax = plt.subplots()
 ax.set_title('Draw a Circle with Mouse')
+ax.set_aspect('equal', 'box')
 ax.set_xlim(-5, 5)
 ax.set_ylim(-5, 5)
+ax.grid(True, alpha=0.3)
 
 """
 ax.plot(0, 2, 'ro')
