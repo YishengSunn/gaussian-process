@@ -7,7 +7,8 @@ from gp.kernels import RBF_kernel, Matern_kernel, RationalQuadratic_kernel, Peri
 
 class LiveCirclePredictor:
     def __init__(self, window=10, predict_steps=20, online=True, train_data=None, 
-                 kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2):
+                 geo_gp=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, 
+                 sigma_n=1e-2):
         """
         Live predictor for circle drawing using Gaussian Processes.
 
@@ -16,6 +17,7 @@ class LiveCirclePredictor:
             predict_steps (int): number of future points to predict.
             online (bool): whether to use online training.
             train_data (np.ndarray): training data for offline training.
+            geo_gp (bool): whether to use geometric invariant GP.
             kernel_type (str): type of kernel to use ('RBF', 'Matern', 'RationalQuadratic', 'Periodic').
             length_scale (float): length scale parameter for the kernel.
             sigma_f (float): signal variance for the kernel.
@@ -25,6 +27,7 @@ class LiveCirclePredictor:
         self.predict_steps = predict_steps
         self.online = online
         self.train_data = train_data
+        self.geo_gp = geo_gp
         self.sigma_n = sigma_n
 
         # Initialize kernel
@@ -45,10 +48,20 @@ class LiveCirclePredictor:
         # Initialize GP models
         self.gp_x = None
         self.gp_y = None
-        if not self.online and self.train_data is None:
-            raise ValueError("train_data must be provided for offline training.")
-        elif not self.online:
-            self.offline_train_gp()
+        self.gp_r = None
+        self.gp_sin = None
+        self.gp_cos = None
+
+        if self.geo_gp:
+            if not self.online and self.train_data is None:
+                raise ValueError("train_data must be provided for offline training.")
+            elif not self.online:
+                self.offline_train_geometric_invariant_gp()
+        else:
+            if not self.online and self.train_data is None:
+                raise ValueError("train_data must be provided for offline training.")
+            elif not self.online:
+                self.offline_train_gp()
 
         # Set up figure and axis
         self.fig, self.ax = plt.subplots()
@@ -56,6 +69,7 @@ class LiveCirclePredictor:
         self.ax.set_ylim(-5, 5)
         self.ax.set_aspect('equal')
         self.ax.set_title("Live Circle Drawing with GP Prediction")
+        self.ax.grid(True, alpha=0.3)
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
@@ -85,6 +99,46 @@ class LiveCirclePredictor:
             X[i] = pos[i:i + self.window].flatten()
             Y[i] = pos[i + self.window] - pos[i + self.window - 1]
         
+        return X, Y
+    
+    def build_geometric_invariant_dataset(self, positions):
+        """
+        Build geometric invariant dataset from positions.
+
+        Args:
+            positions (list of (x, y)): list of recorded positions.
+
+        Returns:
+            X (np.ndarray): input features of shape (M, window * 3).
+            Y (np.ndarray): target outputs of shape (M, 3).
+        """
+        pos = np.array(positions)
+        pos = pos - pos[0]  # Translate to origin
+
+        N = pos.shape[0]
+        M = N - self.window
+        
+        r = np.linalg.norm(pos, axis=1)
+        theta = np.arctan2(pos[:, 1], pos[:, 0])
+        d_polar = np.column_stack((r, np.cos(theta), np.sin(theta)))
+
+        # Normalize to [0, 1]
+        d_polar[:, 0] /= np.max(d_polar[:, 0])
+        d_polar[:, 1] = (d_polar[:, 1] + 1) / 2
+        d_polar[:, 2] = (d_polar[:, 2] + 1) / 2
+
+        # Inputs are absolute and relative polar coordinates over the window
+        X = np.zeros((M, self.window * 6))
+        Y = np.zeros((M, 3))
+
+        for i in range(M):
+            X[i, :self.window * 3] = d_polar[i:i + self.window].flatten()
+            if i > 0:
+                X[i, self.window * 3:] = (d_polar[i:i + self.window] - d_polar[i - 1:i + self.window - 1]).flatten()
+            else:
+                X[i, self.window * 3:] = np.zeros(self.window * 3)
+            Y[i] = d_polar[i + self.window] - d_polar[i + self.window - 1]
+
         return X, Y
 
     def online_train_gp(self):
@@ -116,6 +170,16 @@ class LiveCirclePredictor:
         self.gp_x = GaussianProcess(X, Y[:, [0]], kernel=self.kernel, sigma_n=self.sigma_n)
         self.gp_y = GaussianProcess(X, Y[:, [1]], kernel=self.kernel, sigma_n=self.sigma_n)
 
+    def offline_train_geometric_invariant_gp(self):
+        """
+        Offline training of GP using geometric invariant dataset.
+        """
+        X, Y = self.build_geometric_invariant_dataset(self.train_data)
+
+        self.gp_r = GaussianProcess(X, Y[:, [0]], kernel=self.kernel, sigma_n=self.sigma_n)
+        self.gp_cos = GaussianProcess(X, Y[:, [1]], kernel=self.kernel, sigma_n=self.sigma_n)
+        self.gp_sin = GaussianProcess(X, Y[:, [2]], kernel=self.kernel, sigma_n=self.sigma_n)
+
     def predict_future(self):
         """
         Predict future positions based on current positions.
@@ -137,12 +201,55 @@ class LiveCirclePredictor:
             prev = np.vstack((prev, new_p))
 
         return prev[self.window - 1:]
+    
+    def predict_geometric_invariant_future(self):
+        """
+        Predict future positions using geometric invariant GP.
+        Returns:
+            np.ndarray: predicted future positions of shape (predict_steps + 1, 2).
+        """
+        if len(self.positions) < self.window + 1:
+            return []
+        
+        pos = np.array(self.positions)
+
+        for _ in range(self.predict_steps):
+            pos_translated = pos - pos[0]
+
+            r = np.linalg.norm(pos_translated, axis=1)
+            theta = np.arctan2(pos_translated[:, 1], pos_translated[:, 0])
+            d_polar = np.column_stack((r, np.cos(theta), np.sin(theta)))
+
+            # d_polar[:, 0] /= np.max(d_polar[:, 0])
+            d_polar[:, 1] = (d_polar[:, 1] + 1) / 2
+            d_polar[:, 2] = (d_polar[:, 2] + 1) / 2
+
+            X_in = np.zeros((1, self.window * 6))
+            X_in[0, :3 * self.window] = d_polar[-self.window:].flatten()
+            X_in[0, 3 * self.window:] = (d_polar[-self.window:] - d_polar[-self.window - 1:-1]).flatten()
+
+            mu_dr, _ = self.gp_r.stable_gp_predict(X_in)
+            mu_dcos, _ = self.gp_cos.stable_gp_predict(X_in)
+            mu_dsin, _ = self.gp_sin.stable_gp_predict(X_in)
+
+            new_r = d_polar[-1, 0] + mu_dr[0, 0]
+            new_cos = (d_polar[-1, 1] + mu_dcos[0, 0]) * 2 - 1
+            new_sin = (d_polar[-1, 2] + mu_dsin[0, 0]) * 2 - 1
+            new_theta = np.arctan2(new_sin, new_cos)
+
+            new_x = new_r * np.cos(new_theta)
+            new_y = new_r * np.sin(new_theta)
+
+            new_p = pos[0] + np.array([new_x, new_y])
+            pos = np.vstack((pos, new_p))
+        
+        return pos[self.window - 1:]
 
     def update_prediction_plot(self):
         """
         Update the prediction plot with future predictions.
         """
-        preds = self.predict_future()
+        preds = self.predict_geometric_invariant_future() if self.geo_gp else self.predict_future()
         if len(preds) > 0:
             self.pred_line.set_data(preds[:, 0], preds[:, 1])
             self.fig.canvas.draw_idle()
@@ -187,8 +294,9 @@ perfect_circle = np.vstack((R * np.cos(theta), R * np.sin(theta))).T
 
 # Manual circle
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-path = os.path.join(BASE_DIR, "..", "data", "circle", "strokes.npy")
+path = os.path.join(BASE_DIR, "..", "data", "circle", "circle.npy")
 manual_circle = np.array(np.load(path, allow_pickle=True)[0], dtype=float)
 
-live_circle_predictor = LiveCirclePredictor(window=10, predict_steps=50, online=True, train_data=manual_circle[::3])
+live_circle_predictor = LiveCirclePredictor(window=10, predict_steps=10, online=False, train_data=manual_circle[::2], 
+                                            geo_gp=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2)
 plt.show()
