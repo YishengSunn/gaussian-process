@@ -123,7 +123,7 @@ class LiveCirclePredictor:
         d_polar = np.column_stack((r, np.cos(theta), np.sin(theta)))
 
         # Normalize to [0, 1]
-        d_polar[:, 0] /= np.max(d_polar[:, 0])
+        # d_polar[:, 0] /= np.max(d_polar[:, 0])
         d_polar[:, 1] = (d_polar[:, 1] + 1) / 2
         d_polar[:, 2] = (d_polar[:, 2] + 1) / 2
 
@@ -183,6 +183,7 @@ class LiveCirclePredictor:
     def predict_future(self):
         """
         Predict future positions based on current positions.
+
         Returns:
             np.ndarray: predicted future positions of shape (predict_steps + 1, 2).
         """
@@ -205,6 +206,7 @@ class LiveCirclePredictor:
     def predict_geometric_invariant_future(self):
         """
         Predict future positions using geometric invariant GP.
+        
         Returns:
             np.ndarray: predicted future positions of shape (predict_steps + 1, 2).
         """
@@ -292,11 +294,37 @@ R = 2.0
 theta = np.linspace(np.pi/2, -3*np.pi/2, num_points)
 perfect_circle = np.vstack((R * np.cos(theta), R * np.sin(theta))).T
 
-# Manual circle
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-path = os.path.join(BASE_DIR, "..", "data", "circle", "circle.npy")
-manual_circle = np.array(np.load(path, allow_pickle=True)[0], dtype=float)
+# # Manual circle
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# path = os.path.join(BASE_DIR, "..", "data", "circle", "circle.npy")
+# manual_circle = np.array(np.load(path, allow_pickle=True)[0], dtype=float)
 
-live_circle_predictor = LiveCirclePredictor(window=10, predict_steps=10, online=False, train_data=manual_circle[::2], 
-                                            geo_gp=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2)
+# live_circle_predictor = LiveCirclePredictor(window=10, predict_steps=10, online=False, train_data=manual_circle[::2], 
+#                                             geo_gp=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2)
+# plt.show()
+
+
+train_data_for_model = perfect_circle
+
+predictor = LiveCirclePredictor(
+    window=10,
+    predict_steps=200,
+    online=False,
+    train_data=train_data_for_model,
+    geo_gp=True,
+    kernel_type='RBF',
+    length_scale=5.0,
+    sigma_f=1.0,
+    sigma_n=1e-2
+)
+
+seed_len = 80
+assert seed_len >= predictor.window, "seed_len should be >= predictor.window"
+
+predictor.positions = [list(p) for p in perfect_circle[100:100+seed_len]]
+xs = np.array(predictor.positions)[:, 0]
+ys = np.array(predictor.positions)[:, 1]
+predictor.drawn_line.set_data(xs, ys)
+predictor.update_prediction_plot()
+
 plt.show()
