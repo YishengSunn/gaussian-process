@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from gp.gp_model import GaussianProcess
 from gp.kernels import RBF_kernel, Matern_kernel, RationalQuadratic_kernel, Periodic_kernel
+from utils.utils import rotate_to_fixed_frame, estimate_base_angle, rot2, wrap_pi, find_anchor_at_angle
 
 
 class LiveCirclePredictor:
@@ -73,6 +74,7 @@ class LiveCirclePredictor:
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        self.fig.canvas.mpl_connect('button_release_event', self.on_release)
 
         self.drawn_line, = self.ax.plot([], [], 'b-')
         self.pred_line, = self.ax.plot([], [], 'g--', alpha=0.5)
@@ -109,35 +111,33 @@ class LiveCirclePredictor:
             positions (list of (x, y)): list of recorded positions.
 
         Returns:
-            X (np.ndarray): input features of shape (M, window * 3).
+            X (np.ndarray): input features of shape (M, window * 6).
             Y (np.ndarray): target outputs of shape (M, 3).
         """
-        pos = np.array(positions)
-        pos = pos - pos[0]  # Translate to origin
+        pos = np.asarray(positions)
 
-        N = pos.shape[0]
+        # Compute global base direction (average direction of first window segments)
+        global_base_dir = estimate_base_angle(pos, n_segments=10)
+        # phi0 = np.arctan2(global_base_dir[1], global_base_dir[0])
+
+        origin = pos[0].copy()
+        pos_t = pos - origin
+
+        N = pos_t.shape[0]
         M = N - self.window
         
-        r = np.linalg.norm(pos, axis=1)
-        theta = np.arctan2(pos[:, 1], pos[:, 0])
+        r = np.linalg.norm(pos_t, axis=1)
+        # theta = np.arctan2(pos_t[:, 1], pos_t[:, 0]) - phi0
+        theta = np.arctan2(pos_t[:, 1], pos_t[:, 0])
         d_polar = np.column_stack((r, np.cos(theta), np.sin(theta)))
 
-        # Normalize to [0, 1]
-        # d_polar[:, 0] /= np.max(d_polar[:, 0])
-        d_polar[:, 1] = (d_polar[:, 1] + 1) / 2
-        d_polar[:, 2] = (d_polar[:, 2] + 1) / 2
-
-        # Inputs are absolute and relative polar coordinates over the window
-        X = np.zeros((M, self.window * 6))
-        Y = np.zeros((M, 3))
+        # Inputs are absolute polar coordinates over the window
+        X = np.zeros((M, self.window * 3), dtype=np.float64)
+        Y = np.zeros((M, 2), dtype=np.float64)
 
         for i in range(M):
-            X[i, :self.window * 3] = d_polar[i:i + self.window].flatten()
-            if i > 0:
-                X[i, self.window * 3:] = (d_polar[i:i + self.window] - d_polar[i - 1:i + self.window - 1]).flatten()
-            else:
-                X[i, self.window * 3:] = np.zeros(self.window * 3)
-            Y[i] = d_polar[i + self.window] - d_polar[i + self.window - 1]
+            X[i] = d_polar[i:i + self.window].flatten()
+            Y[i] = rotate_to_fixed_frame(pos[i + self.window] - pos[i + self.window - 1], global_base_dir)
 
         return X, Y
 
@@ -176,9 +176,8 @@ class LiveCirclePredictor:
         """
         X, Y = self.build_geometric_invariant_dataset(self.train_data)
 
-        self.gp_r = GaussianProcess(X, Y[:, [0]], kernel=self.kernel, sigma_n=self.sigma_n)
-        self.gp_cos = GaussianProcess(X, Y[:, [1]], kernel=self.kernel, sigma_n=self.sigma_n)
-        self.gp_sin = GaussianProcess(X, Y[:, [2]], kernel=self.kernel, sigma_n=self.sigma_n)
+        self.gp_x = GaussianProcess(X, Y[:, [0]], kernel=self.kernel, sigma_n=self.sigma_n)
+        self.gp_y = GaussianProcess(X, Y[:, [1]], kernel=self.kernel, sigma_n=self.sigma_n)
 
     def predict_future(self):
         """
@@ -205,47 +204,86 @@ class LiveCirclePredictor:
     
     def predict_geometric_invariant_future(self):
         """
-        Predict future positions using geometric invariant GP.
+        Predict future positions using geometric invariant GP with explicit probe→reference alignment at a fixed anchor angle.
         
         Returns:
             np.ndarray: predicted future positions of shape (predict_steps + 1, 2).
         """
-        if len(self.positions) < self.window + 1:
+        if len(self.positions) < self.window + 2:
+            return []
+                
+        # Reference data
+        ref = np.asarray(self.train_data)
+        ref_origin = ref[0]
+        global_base_dir = estimate_base_angle(np.asarray(ref), n_segments=10)
+
+        i_ref = find_anchor_at_angle(ref)
+        if i_ref is None:
             return []
         
-        pos = np.array(self.positions)
+        ref_anchor = ref[i_ref]
+        v_ref = ref_anchor - ref_origin
+        nr = np.linalg.norm(v_ref)
+        if nr < 1e-9:
+            return []
+        
+        ang_ref = np.arctan2(v_ref[1], v_ref[0])
+
+        # Probe data
+        probe = np.asarray(self.positions)
+        probe_origin = probe[0]
+
+        i_probe = find_anchor_at_angle(probe)
+        if i_probe is None:
+            return []
+
+        probe_anchor = probe[i_probe]
+        v_probe = probe_anchor - probe_origin
+        nn = np.linalg.norm(v_probe)
+        if nn < 1e-9:
+            return []
+
+        ang_probe = np.arctan2(v_probe[1], v_probe[0])
+
+        # Similarity transform
+        dtheta = wrap_pi(ang_probe - ang_ref)
+        scale = nn / nr
+
+        # Probe -> Reference frame
+        R_inv = rot2(-dtheta)
+        probe_in_ref = (probe - probe_origin) @ R_inv.T / scale + ref_origin
+
+        # GP rollout in reference frame
+        pos = probe_in_ref.copy()
 
         for _ in range(self.predict_steps):
-            pos_translated = pos - pos[0]
+            pos_t = pos - ref_origin
 
-            r = np.linalg.norm(pos_translated, axis=1)
-            theta = np.arctan2(pos_translated[:, 1], pos_translated[:, 0])
+            r = np.linalg.norm(pos_t, axis=1)
+            theta = np.arctan2(pos_t[:, 1], pos_t[:, 0])
             d_polar = np.column_stack((r, np.cos(theta), np.sin(theta)))
 
-            # d_polar[:, 0] /= np.max(d_polar[:, 0])
-            d_polar[:, 1] = (d_polar[:, 1] + 1) / 2
-            d_polar[:, 2] = (d_polar[:, 2] + 1) / 2
+            X_in = d_polar[-self.window:].flatten().reshape(1, -1)
 
-            X_in = np.zeros((1, self.window * 6))
-            X_in[0, :3 * self.window] = d_polar[-self.window:].flatten()
-            X_in[0, 3 * self.window:] = (d_polar[-self.window:] - d_polar[-self.window - 1:-1]).flatten()
+            mu_dx, _ = self.gp_x.stable_gp_predict(X_in)
+            mu_dy, _ = self.gp_y.stable_gp_predict(X_in)
+            step_fixed = np.array([mu_dx[0, 0], mu_dy[0, 0]])
 
-            mu_dr, _ = self.gp_r.stable_gp_predict(X_in)
-            mu_dcos, _ = self.gp_cos.stable_gp_predict(X_in)
-            mu_dsin, _ = self.gp_sin.stable_gp_predict(X_in)
+            # Map step back to world frame
+            gb = global_base_dir / np.linalg.norm(global_base_dir)
+            R = np.column_stack([gb, np.array([-gb[1], gb[0]])])
+            step_world = step_fixed @ R.T
+            new_p = pos[-1] + step_world
 
-            new_r = d_polar[-1, 0] + mu_dr[0, 0]
-            new_cos = (d_polar[-1, 1] + mu_dcos[0, 0]) * 2 - 1
-            new_sin = (d_polar[-1, 2] + mu_dsin[0, 0]) * 2 - 1
-            new_theta = np.arctan2(new_sin, new_cos)
-
-            new_x = new_r * np.cos(new_theta)
-            new_y = new_r * np.sin(new_theta)
-
-            new_p = pos[0] + np.array([new_x, new_y])
             pos = np.vstack((pos, new_p))
-        
-        return pos[self.window - 1:]
+
+        preds_ref = pos[self.window - 1:]
+
+        # Map back to probe frame
+        R = rot2(dtheta)
+        preds_probe = scale * ((preds_ref - ref_origin) @ R.T) + probe_origin
+
+        return preds_probe
 
     def update_prediction_plot(self):
         """
@@ -282,46 +320,45 @@ class LiveCirclePredictor:
             # Add new point
             self.positions.append([event.xdata, event.ydata])
             self.drawn_line.set_data(np.array(self.positions)[:, 0], np.array(self.positions)[:, 1])
+            self.fig.canvas.draw_idle()
 
             if self.online:
                 self.online_train_gp()
+
+    def on_release(self, event):
+        """
+        Handle mouse release events.
+        """
+        if event.button == 1:
             self.update_prediction_plot()
 
 
-# Perfect circle
-num_points = 400
+# Training circle
+num_points = 500
 R = 2.0
 theta = np.linspace(np.pi/2, -3*np.pi/2, num_points)
-perfect_circle = np.vstack((R * np.cos(theta), R * np.sin(theta))).T
+training_circle = np.vstack((R * np.cos(theta), R * np.sin(theta))).T
 
-# # Manual circle
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# path = os.path.join(BASE_DIR, "..", "data", "circle", "circle.npy")
-# manual_circle = np.array(np.load(path, allow_pickle=True)[0], dtype=float)
+# Test circle
+num_points = 500
+R = 3
+center = np.array([1.2, -0.8])
+theta = np.linspace(np.pi/2, -3*np.pi/2, num_points)
+test_circle = center + np.vstack((R * np.cos(theta), R * np.sin(theta))).T
 
-# live_circle_predictor = LiveCirclePredictor(window=10, predict_steps=10, online=False, train_data=manual_circle[::2], 
-#                                             geo_gp=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2)
-# plt.show()
+# Manual circle
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+path = os.path.join(BASE_DIR, "..", "data", "circle.npy")
+manual_circle = np.array(np.load(path, allow_pickle=True)[0], dtype=float)
 
+predictor = LiveCirclePredictor(window=10, predict_steps=150, online=False, train_data=training_circle[::2],
+                                geo_gp=True, kernel_type='RBF', length_scale=5.0, sigma_f=1.0, sigma_n=1e-2)
 
-train_data_for_model = perfect_circle
+test_start = 80
+test_len = 180
+assert test_len >= predictor.window + 1, "test_len should be > predictor.window"
 
-predictor = LiveCirclePredictor(
-    window=10,
-    predict_steps=200,
-    online=False,
-    train_data=train_data_for_model,
-    geo_gp=True,
-    kernel_type='RBF',
-    length_scale=5.0,
-    sigma_f=1.0,
-    sigma_n=1e-2
-)
-
-seed_len = 80
-assert seed_len >= predictor.window, "seed_len should be >= predictor.window"
-
-predictor.positions = [list(p) for p in perfect_circle[100:100+seed_len]]
+predictor.positions = [list(p) for p in test_circle[test_start:test_start + test_len:2]]
 xs = np.array(predictor.positions)[:, 0]
 ys = np.array(predictor.positions)[:, 1]
 predictor.drawn_line.set_data(xs, ys)
