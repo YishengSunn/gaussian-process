@@ -76,8 +76,11 @@ class LiveCirclePredictor:
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
 
+        self.train_line, = self.ax.plot([], [], 'r-', alpha=0.3)
+        self.train_line.set_data(np.array(self.train_data)[:, 0], np.array(self.train_data)[:, 1]) if self.train_data is not None else None
         self.drawn_line, = self.ax.plot([], [], 'b-')
         self.pred_line, = self.ax.plot([], [], 'g--', alpha=0.5)
+
 
     def build_autoregressive_dataset(self, positions):
         """
